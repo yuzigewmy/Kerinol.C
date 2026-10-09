@@ -6,6 +6,7 @@
 
 - `dist/`：可直接部署的静态网站，原生 HTML、CSS、JavaScript，无前端依赖。
 - `assets/neofetch.gif`：GitHub README 使用的循环动画。
+- `assets/portrait-crt.gif`：独立动态头像，包含发梢飘动、轻微呼吸与墨镜反光。
 - `assets/neofetch.png`：静态展示与减少动态效果模式。
 - `tools/avatar.png`：用户原始头像，仅转换为 PNG。
 - `tools/portrait-crt.png`：头像风格迁移后的绿色点阵素材。

@@ -12,6 +12,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import math
 from pathlib import Path
 
 from PIL import Image, ImageChops, ImageDraw, ImageFilter, ImageFont, ImageOps
@@ -72,6 +73,46 @@ def prepared_portrait(path: Path) -> Image.Image:
     green = tone.point(lambda value: 13 + value * 225 // 255)
     blue = tone.point(lambda value: 8 + value * 70 // 255)
     return Image.merge("RGB", (red, green, blue))
+
+
+def animated_portrait(portrait: Image.Image, phase: float) -> Image.Image:
+    """Keep the image edges fixed while hair tips sway and the figure breathes."""
+    width, height = portrait.size
+    progress = phase / math.tau
+    glint = (progress - 0.28) / 0.16
+    image = portrait
+    if 0 < glint < 1:
+        lenses = Image.new("L", portrait.size)
+        draw = ImageDraw.Draw(lenses)
+        draw.polygon(((143, 181), (154, 178), (181, 180), (191, 185),
+                      (196, 194), (190, 205), (175, 210), (151, 207), (145, 198)), fill=255)
+        draw.polygon(((224, 181), (237, 178), (258, 181), (269, 187),
+                      (274, 199), (267, 210), (250, 213), (230, 208), (224, 198)), fill=255)
+        shine = Image.new("L", portrait.size)
+        center = 127 + 166 * glint
+        ImageDraw.Draw(shine).polygon(((center - 7, 169), (center + 7, 169),
+            (center - 5, 222), (center - 19, 222)), fill=round(40 * math.sin(math.pi * glint)))
+        shine = ImageChops.multiply(shine.filter(ImageFilter.GaussianBlur(2)), lenses)
+        image = ImageChops.add(portrait, Image.merge("RGB", (
+            shine.point(lambda value: value // 2), shine, shine.point(lambda value: value // 3))))
+
+    def source_point(x: int, y: int) -> tuple[float, float]:
+        edge = max(0, min(1, x / 20, (width - x) / 20, y / 20, (height - y) / 20))
+        hair = max(0, min(1, (185 - y) / 125))
+        wind = 5.5 * math.sin(phase * 2) + 1.2 * math.sin(phase * 4)
+        dx = edge * (0.6 * math.sin(phase * 3) + hair * wind)
+        dy = edge * (1.6 * math.sin(phase * 3) + hair * 1.2 * math.sin(phase * 2))
+        return x - dx, y - dy
+
+    mesh = []
+    for y in range(0, height, 24):
+        for x in range(0, width, 24):
+            right, bottom = min(x + 24, width), min(y + 24, height)
+            corners = (source_point(x, y), source_point(x, bottom),
+                       source_point(right, bottom), source_point(right, y))
+            mesh.append(((x, y, right, bottom), tuple(value for point in corners for value in point)))
+    return image.transform(portrait.size, Image.Transform.MESH, mesh,
+                           resample=Image.Resampling.BICUBIC)
 
 
 def base_screen(portrait: Image.Image, fonts: dict[str, ImageFont.FreeTypeFont]) -> Image.Image:
@@ -150,11 +191,23 @@ def generate(args: argparse.Namespace) -> dict[str, object]:
     shade = shade.filter(ImageFilter.GaussianBlur(90))
     vignette = Image.merge("RGB", (shade, shade, shade))
 
-    states = frames_for_commands()
+    command_states = frames_for_commands()
+    total_ms = sum(duration // 10 * 10 for _, _, duration in command_states)
+    states = []
+    command_index, command_end = 0, command_states[0][2] // 10 * 10
+    for elapsed in range(0, total_ms, 100):
+        while elapsed >= command_end and command_index < len(command_states) - 1:
+            command_index += 1
+            command_end += command_states[command_index][2] // 10 * 10
+        command, cursor_on, _ = command_states[command_index]
+        states.append((command, cursor_on, min(100, total_ms - elapsed)))
     frames = []
     durations = []
+    elapsed_ms = 0
     for command, cursor_on, duration in states:
         frame = base.copy()
+        phase = math.tau * elapsed_ms / total_ms
+        frame.paste(animated_portrait(portrait, phase), (34, 54))
         draw = ImageDraw.Draw(frame)
         prompt = "kerinol.c@local:~$ "
         draw.text((38, 489), prompt, font=fonts["normal"], fill=GREEN)
@@ -165,6 +218,9 @@ def generate(args: argparse.Namespace) -> dict[str, object]:
             draw.rectangle((cursor_x, 491, cursor_x + 7, 506), fill=BRIGHT)
         frames.append(crt_pass(frame, vignette, mask))
         durations.append(duration)
+        elapsed_ms += duration
+    frames.append(frames[0].copy())
+    durations.append(100)
 
     # A global palette and GIF frame deltas make the static portrait cheap.
     palette_source = Image.new("RGB", (WIDTH, HEIGHT + 48), BACKGROUND)
@@ -174,11 +230,14 @@ def generate(args: argparse.Namespace) -> dict[str, object]:
             (102, 142, 183), (166, 120, 175), (95, 188, 183), (204, 223, 191),
             (103, 123, 107))):
         palette_draw.rectangle((index * 100, HEIGHT, index * 100 + 99, HEIGHT + 47), fill=color)
-    palette = palette_source.quantize(colors=192, method=Image.Quantize.MEDIANCUT)
+    palette = palette_source.quantize(colors=48, method=Image.Quantize.MEDIANCUT)
     indexed = [frame.quantize(palette=palette, dither=Image.Dither.NONE) for frame in frames]
     gif_path = assets / "neofetch.gif"
     indexed[0].save(gif_path, save_all=True, append_images=indexed[1:],
                     duration=durations, loop=0, optimize=True, disposal=1)
+    portrait_frames = [frame.crop((34, 54, 442, 462)) for frame in indexed]
+    portrait_frames[0].save(assets / "portrait-crt.gif", save_all=True,
+        append_images=portrait_frames[1:], duration=durations, loop=0, optimize=True, disposal=1)
     full_command_index = next(i for i, state in enumerate(states) if state[0] == "whoami")
     frames[full_command_index].save(assets / "neofetch.png")
 
@@ -191,7 +250,7 @@ def generate(args: argparse.Namespace) -> dict[str, object]:
         decoded.load()
         rgb = decoded.convert("RGB")
         assert rgb.size == (WIDTH, HEIGHT), (index, rgb.size)
-        static = rgb.crop((0, 0, WIDTH, 478))
+        static = rgb.crop((467, 54, 770, 462))
         if comparison is None:
             comparison = static
         else:
@@ -200,7 +259,10 @@ def generate(args: argparse.Namespace) -> dict[str, object]:
         decoded_frames.append(rgb.copy())
     assert decoded.info.get("loop", 0) == 0
     assert ImageChops.difference(decoded_frames[0], decoded_frames[-1]).getbbox() is None
-    assert gif_path.stat().st_size < 2_000_000
+    assert gif_path.stat().st_size < 6_000_000
+    portrait_unique = len({frame.crop((34, 54, 442, 462)).tobytes() for frame in decoded_frames})
+    hair_unique = len({frame.crop((134, 74, 424, 224)).tobytes() for frame in decoded_frames})
+    assert portrait_unique > 20 and hair_unique > 20
     assert ImageChops.difference(source, Image.open(tools / "avatar.png").convert("RGB")).getbbox() is None
 
     sampled_indices = (0, full_command_index, len(decoded_frames) // 3,
@@ -221,7 +283,11 @@ def generate(args: argparse.Namespace) -> dict[str, object]:
         "total_duration_ms": total_duration,
         "bytes": gif_path.stat().st_size,
         "all_frames_decoded": True,
-        "static_profile_unchanged": True,
+        "profile_text_unchanged": True,
+        "portrait_animated": True,
+        "hair_animated": True,
+        "portrait_unique_frames": portrait_unique,
+        "hair_unique_frames": hair_unique,
         "loop_seam_equal": True,
         "font": face,
         "portrait": str(args.portrait) if args.portrait else "deterministic stippled source",

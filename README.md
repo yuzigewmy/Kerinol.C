@@ -1,6 +1,6 @@
 <p align="center">
   <a href="https://kerinol-c.spunkyhero2.chatgpt.site/">
-    <img src="assets/neofetch.gif" width="800" alt="Kerinol.C 的绿色 CRT 字符头像与个人终端" />
+    <img src="assets/neofetch.gif?v=hair-motion-1" width="800" alt="Kerinol.C 的绿色 CRT 动态头像与个人终端，头发轻轻飘动" />
   </a>
 </p>
 

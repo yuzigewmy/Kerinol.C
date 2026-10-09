@@ -4,7 +4,7 @@
   const input = document.getElementById('command-input');
   const output = document.getElementById('terminal-output');
   const terminal = document.getElementById('terminal');
-  const art = document.getElementById('profile-art');
+  const artworks = document.querySelectorAll('[data-animated]');
   const motionButton = document.getElementById('motion-toggle');
   const effectsButton = document.getElementById('effects-toggle');
   const reducedMotion = window.matchMedia('(prefers-reduced-motion: reduce)');
@@ -51,7 +51,7 @@
     effectsButton.textContent = '光效：' + (effectsOn ? '开' : '关');
   });
   function setMotion(enabled) {
-    art.src = enabled ? art.dataset.animated : art.dataset.static;
+    artworks.forEach(art => { art.src = enabled ? art.dataset.animated : art.dataset.static; });
     motionButton.setAttribute('aria-pressed', String(enabled));
     motionButton.textContent = '动画：' + (enabled ? '开' : '关');
   }
