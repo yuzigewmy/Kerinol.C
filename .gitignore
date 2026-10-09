@@ -1,0 +1,10 @@
+.sites-runtime/
+.sites-checkout*/
+node_modules/
+__pycache__/
+*.pyc
+.env
+.env.*
+work/
+*.tar.gz
+*.zip
