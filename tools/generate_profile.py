@@ -25,6 +25,10 @@ BRIGHT = (204, 255, 193)
 MUTED = (60, 114, 69)
 COMMANDS = ("whoami", "open personal_archive", "keep_building()")
 ASCII_LEVELS = " .,:;i1tfLCG08@"
+PROFILE_ROWS = (("Name", "Kerinol.C"), ("Handle", "@yuzigewmy"),
+                ("Interface", "terminal"), ("Mode", "build · learn · repeat"),
+                ("Memory", "ideas in progress"))
+MOTTO_LINES = ("while (true) {", "  keep_building();", "}")
 
 
 def font_path(requested: str | None) -> str:
@@ -122,19 +126,13 @@ def base_screen(portrait: Image.Image, fonts: dict[str, ImageFont.FreeTypeFont])
     draw.text((651, 26), "PROFILE  /  01", font=fonts["small"], fill=MUTED)
     image.paste(portrait, (34, 54))
     x, y = 475, 88
-    for label, value in (
-        ("Name", "Kerinol.C"),
-        ("Handle", "@yuzigewmy"),
-        ("Interface", "terminal"),
-        ("Mode", "build · learn · repeat"),
-        ("Memory", "ideas in progress"),
-    ):
+    for label, value in PROFILE_ROWS:
         draw.text((x, y), label + ":", font=fonts["normal"], fill=BRIGHT)
         draw.text((x + 99, y), value, font=fonts["normal"], fill=GREEN)
         y += 29
     draw.line((x, 249, 758, 249), fill=(24, 62, 34), width=1)
     draw.text((x, 270), "Motto:", font=fonts["normal"], fill=BRIGHT)
-    for row, line in enumerate(("while (true) {", "  keep_building();", "}")):
+    for row, line in enumerate(MOTTO_LINES):
         draw.text((x, 300 + row * 26), line, font=fonts["normal"], fill=GREEN)
     draw.text((x, 404), "A PERSONAL CORNER", font=fonts["small"], fill=MUTED)
     colors = ((171, 73, 74), (95, 188, 113), (203, 185, 89), (102, 142, 183),
@@ -143,6 +141,46 @@ def base_screen(portrait: Image.Image, fonts: dict[str, ImageFont.FreeTypeFont])
         draw.rectangle((x + index * 25, 433, x + index * 25 + 21, 443), fill=color)
     draw.line((38, 476, 761, 476), fill=(24, 56, 31), width=1)
     return image
+
+
+def animate_profile_text(image: Image.Image, fonts: dict[str, ImageFont.FreeTypeFont],
+                         elapsed_ms: int) -> None:
+    """Hold the complete profile, fade it out, then type each row in place."""
+    if elapsed_ms < 1200:
+        return
+    draw = ImageDraw.Draw(image)
+    for box in ((470, 82, 774, 237), (470, 268, 774, 379), (470, 400, 774, 422)):
+        draw.rectangle(box, fill=BACKGROUND)
+    lines = [((475, 88 + row * 29, label + ":", "normal", BRIGHT),
+              (574, 88 + row * 29, value, "normal", GREEN))
+             for row, (label, value) in enumerate(PROFILE_ROWS)]
+    lines.append(((475, 270, "Motto:", "normal", BRIGHT),))
+    lines.extend(((475, 300 + row * 26, line, "normal", GREEN),)
+                 for row, line in enumerate(MOTTO_LINES))
+    lines.append(((475, 404, "A PERSONAL CORNER", "small", MUTED),))
+    fading = elapsed_ms < 1500
+    intensity = max(0, (1500 - elapsed_ms) / 300) if fading else 1
+    remaining = elapsed_ms - 1600
+    for segments in lines:
+        length = sum(len(segment[2]) for segment in segments)
+        duration = length * 30 + 120
+        visible = length if fading else max(0, min(length, remaining // 30))
+        active = not fading and 0 <= remaining < duration
+        cursor = None
+        for x, y, text, font_key, color in segments:
+            prefix = text[:visible]
+            fill = tuple(round(bg + (fg - bg) * intensity)
+                         for bg, fg in zip(BACKGROUND, color))
+            draw.text((x, y), prefix, font=fonts[font_key], fill=fill)
+            if visible <= len(text):
+                cursor = (round(x + draw.textlength(prefix, font=fonts[font_key])), y, font_key)
+                break
+            visible -= len(text)
+        if active and cursor and elapsed_ms // 300 % 2 == 0:
+            x, y, font_key = cursor
+            height = 11 if font_key == "small" else 15
+            draw.rectangle((x + 2, y + 2, x + 7, y + height), fill=BRIGHT)
+        remaining -= duration
 
 
 def crt_pass(image: Image.Image, vignette: Image.Image, mask: Image.Image) -> Image.Image:
@@ -208,6 +246,7 @@ def generate(args: argparse.Namespace) -> dict[str, object]:
         frame = base.copy()
         phase = math.tau * elapsed_ms / total_ms
         frame.paste(animated_portrait(portrait, phase), (34, 54))
+        animate_profile_text(frame, fonts, elapsed_ms)
         draw = ImageDraw.Draw(frame)
         prompt = "kerinol.c@local:~$ "
         draw.text((38, 489), prompt, font=fonts["normal"], fill=GREEN)
@@ -222,7 +261,7 @@ def generate(args: argparse.Namespace) -> dict[str, object]:
     frames.append(frames[0].copy())
     durations.append(100)
 
-    # A global palette and GIF frame deltas make the static portrait cheap.
+    # The first frame contains the full profile, keeping its global palette stable.
     palette_source = Image.new("RGB", (WIDTH, HEIGHT + 48), BACKGROUND)
     palette_source.paste(frames[0], (0, 0))
     palette_draw = ImageDraw.Draw(palette_source)
@@ -239,7 +278,12 @@ def generate(args: argparse.Namespace) -> dict[str, object]:
     portrait_frames[0].save(assets / "portrait-crt.gif", save_all=True,
         append_images=portrait_frames[1:], duration=durations, loop=0, optimize=True, disposal=1)
     full_command_index = next(i for i, state in enumerate(states) if state[0] == "whoami")
-    frames[full_command_index].save(assets / "neofetch.png")
+    # The reduced-motion fallback always displays every profile line.
+    static_frame = frames[full_command_index].copy()
+    static_frame.paste(crt_pass(base, vignette, mask).crop((467, 54, 770, 462)), (467, 54))
+    static_frame.save(assets / "neofetch.png")
+    assert ImageChops.difference(Image.open(assets / "neofetch.png").crop((467, 54, 770, 462)),
+                                crt_pass(base, vignette, mask).crop((467, 54, 770, 462))).getbbox() is None
 
     decoded = Image.open(gif_path)
     total_duration = 0
@@ -250,7 +294,7 @@ def generate(args: argparse.Namespace) -> dict[str, object]:
         decoded.load()
         rgb = decoded.convert("RGB")
         assert rgb.size == (WIDTH, HEIGHT), (index, rgb.size)
-        static = rgb.crop((467, 54, 770, 462))
+        static = rgb.crop((0, 0, WIDTH, 48))
         if comparison is None:
             comparison = static
         else:
@@ -262,7 +306,10 @@ def generate(args: argparse.Namespace) -> dict[str, object]:
     assert gif_path.stat().st_size < 6_000_000
     portrait_unique = len({frame.crop((34, 54, 442, 462)).tobytes() for frame in decoded_frames})
     hair_unique = len({frame.crop((134, 74, 424, 224)).tobytes() for frame in decoded_frames})
-    assert portrait_unique > 20 and hair_unique > 20
+    text_unique = len({frame.crop((467, 54, 770, 422)).tobytes() for frame in decoded_frames})
+    assert portrait_unique > 20 and hair_unique > 20 and text_unique > 40
+    assert ImageChops.difference(decoded_frames[0].crop((467, 54, 770, 422)),
+                                decoded_frames[-2].crop((467, 54, 770, 422))).getbbox() is None
     assert ImageChops.difference(source, Image.open(tools / "avatar.png").convert("RGB")).getbbox() is None
 
     sampled_indices = (0, full_command_index, len(decoded_frames) // 3,
@@ -283,7 +330,11 @@ def generate(args: argparse.Namespace) -> dict[str, object]:
         "total_duration_ms": total_duration,
         "bytes": gif_path.stat().st_size,
         "all_frames_decoded": True,
-        "profile_text_unchanged": True,
+        "profile_text_animated": True,
+        "profile_text_unique_frames": text_unique,
+        "profile_text_complete_at_loop_end": True,
+        "static_fallback_text_complete": True,
+        "header_unchanged": True,
         "portrait_animated": True,
         "hair_animated": True,
         "portrait_unique_frames": portrait_unique,

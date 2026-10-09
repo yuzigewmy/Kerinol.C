@@ -5,7 +5,7 @@
 ## 项目结构
 
 - `dist/`：可直接部署的静态网站，原生 HTML、CSS、JavaScript，无前端依赖。
-- `assets/neofetch.gif`：GitHub README 使用的循环动画。
+- `assets/neofetch.gif`：GitHub README 使用的循环动画，个人信息与座右铭逐行打字、光标跟随，完整内容停留后循环。
 - `assets/portrait-crt.gif`：独立动态头像，包含发梢飘动、轻微呼吸与墨镜反光。
 - `assets/neofetch.png`：静态展示与减少动态效果模式。
 - `tools/avatar.png`：用户原始头像，仅转换为 PNG。
